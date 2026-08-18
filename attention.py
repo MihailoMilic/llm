@@ -25,6 +25,8 @@ class CausalSelfAttention(nn.Module):
 
         self.register_buffer("mask", torch.tril(torch.ones(max_T, max_T).view(1,1,max_T, max_T)))
 
+        self.register_buffer("k_cache",None, persistent=False)
+        self.register_buffer("v_cache", None, persistent=False)
 
     def uptrain_to_gqa(self, new_gqa_group):
 
@@ -51,7 +53,12 @@ class CausalSelfAttention(nn.Module):
         self.gqa_group = new_gqa_group
 
 
-    def forward(self, x):
+    def clear_cache(self):
+        self.k_cache = None
+        self.v_cache = None
+
+    def forward(self, x, use_cache = False):
+
         # dimensions
         B,T,C = x.shape
         n, d, g = self.n_heads, self.d, self.gqa_group
@@ -68,29 +75,37 @@ class CausalSelfAttention(nn.Module):
         K = K.transpose(1,2) #(B,g,T,d)
         V = V.transpose(1,2) #(B,g,T,d)
 
-        Q = self.rope(Q)
-        K = self.rope(K)
+        past_len = self.k_cache.shape[-2] if (use_cache and self.k_cache is not None) else 0
+        Q = self.rope(Q, offset = past_len)
+        K = self.rope(K, offset = past_len)
+       
+        if use_cache:
+            if self.k_cache is not None:
+                if self.v_cache is not None:
+                    K = torch.concat([self.k_cache, K], dim = -2)
+                    V = torch.concat([self.v_cache, V], dim = -2)
+            self.k_cache = K
+            self.v_cache = V
+        T_full = K.shape[-2]
 
-        K = K.unsqueeze(2).expand(B,g,p,T,d).reshape(B,n,T,d)     #(B,g,T,d) -> (B,g,1,T,d) -> (B,g,p,T,d) -> (B,g*p,T,d) = (B,n,T,d)
-        V = V.unsqueeze(2).expand(B,g,p,T,d).reshape(B,n,T,d)     #(B,g,T,d) -> (B,g,1,T,d) -> (B,g,p,T,d) -> (B,g*p,T,d) = (B,n,T,d)
+        K = K.unsqueeze(2).expand(B,g,p,T_full,d).reshape(B,n,T_full,d)     #(B,g,T,d) -> (B,g,1,T,d) -> (B,g,p,T,d) -> (B,g*p,T,d) = (B,n,T,d)
+        V = V.unsqueeze(2).expand(B,g,p,T_full,d).reshape(B,n,T_full,d)     #(B,g,T,d) -> (B,g,1,T,d) -> (B,g,p,T,d) -> (B,g*p,T,d) = (B,n,T,d)
         attr = Q @ K.transpose(-2,-1) #(B,n, T,d) @ (B,n,d,T) = (B,n,T,T)
         attr = attr / d**0.5
-        attr = attr.masked_fill(self.mask[:, :, :T, :T] == 0, float('-inf'))
+        attr = attr.masked_fill(self.mask[:, :, past_len:T+past_len, :T_full] == 0, float('-inf'))
         attr = self.attn_drop(torch.softmax(attr, dim = -1))
 
-        out = attr @ V
+        out = attr @ V #(B,n,T,T) @(B,n,T,d) = (B,n,T,d)
 
-        out=  out.transpose(1,2).contiguous().view(B,T,C)
-        return self.residual_drop(self.w_out(out))
-
-
+        out=  out.transpose(1,2).contiguous().view(B,T,C) #(B,n,T,d) -> (B,T,n,d) -> (B,T,C)
+        return self.residual_drop(self.w_out(out)) # out (B,T,C)
 
 
 class SwiGLU(nn.Module):
     def __init__(self, C, hidden = None, multiple_of = 64):
         super().__init__()
         self.hidden = int(multiple_of * ((2/3 * 4 * C + multiple_of -1) // multiple_of) if hidden is None else hidden)
-        print(self.hidden)
+
         self.v_w = nn.Linear(C, 2* self.hidden, bias = False)
         self.resid_width = nn.Linear(self.hidden, C, bias=False)
 
