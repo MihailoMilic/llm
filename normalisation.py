@@ -8,5 +8,6 @@ class RMSNorm(nn.Module):
         self.weight = nn.Parameter(torch.ones(C))
 
     def forward(self, x):
-        rms = x.pow(2).mean(dim=-1, keepdim=True).add(self.eps).rsqrt() #remember where eps was added in here
-        return x * rms * self.weight
+        x_fp32 = x.float()
+        rms = x_fp32.pow(2).mean(dim=-1, keepdim=True).add(self.eps).rsqrt() #remember where eps was added in here
+        return x_fp32 * rms * self.weight

@@ -27,3 +27,4 @@ for flag in (False, True):
     out.append(o)
 
 print(torch.equal(out[0], out[1]))
+
