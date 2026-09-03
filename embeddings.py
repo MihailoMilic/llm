@@ -40,7 +40,7 @@ def RoPE_kernel(x_ptr, out_ptr, T,d, d_half, offset,BLOCK_SIZE:tl.constexpr):
     mask = offs < d_half
     re = tl.load(row_ptr + re_offs, mask = mask, other = 0.0)
     im = tl.load(row_ptr + im_offs, mask = mask, other = 0.0)
-    theta = 1 / tl.exp((offs.to(tl.float32) * 2.0 / d)* math.log(10000.0))
+    theta = 1 / tl.exp((offs.to(tl.float32) * 2.0 / d) * 9.210340371976184)
     a = p * theta
     cos = tl.cos(a)
     sin = tl.sin(a)
@@ -65,8 +65,11 @@ def rope_forward(x, offset):
 
 
 torch.manual_seed(0)
-x = torch.randn(128, 128, 256, 512)
+device = 'cuda'
+x = torch.randn(2, 4, 16, 64, device=device)
 offset = 0
-x = RoPE.forward(x, offset= offset)
+r = RoPE(64, 128).to(device)
+x_to = r.forward(x, offset= offset)
 x_t = rope_forward(x, offset= offset)
-
+print(torch.allclose(x_to, x_t, atol=1e-5, rtol=1e-5))
+print((x_to - x_t).abs().max().item())
