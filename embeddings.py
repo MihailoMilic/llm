@@ -28,19 +28,25 @@ class RoPE(nn.Module):
 
 
 @triton.jit
-def RoPE_kernel(x_ptr, out_ptr, T,d, d_half, offset,BLOCK_SIZE:tl.constexpr):
+def RoPE_kernel(x_ptr, out_ptr,bx_stride, nhx_stride, tx_stride, bo_stride, nho_stride, to_stride, B,n,T,d, d_half, offset,BLOCK_SIZE:tl.constexpr):
     pid = tl.program_id(0)
+
     t = pid % T
+    nh = ( pid // T ) % n
+    b = pid // (T * n)
     p = t + offset
-    row_ptr = x_ptr + pid * d
-    row_out_ptr = out_ptr + pid * d
+
+    row_ptr = x_ptr + b * bx_stride + nh * nhx_stride + t * tx_stride
+    row_out_ptr = out_ptr + bo_stride + nh * nho_stride + t * to_stride
+
     offs = tl.arange(0, BLOCK_SIZE)
+
     re_offs = 2 * offs 
     im_offs = 2 * offs + 1
     mask = offs < d_half
     re = tl.load(row_ptr + re_offs, mask = mask, other = 0.0)
     im = tl.load(row_ptr + im_offs, mask = mask, other = 0.0)
-    theta = 1 / tl.exp((offs.to(tl.float32) * 2.0 / d) * 9.210340371976184)
+    theta = 1 / tl.exp((offs.to(tl.float32) * 2.0 / d ) * 9.210340371976184)
     a = p * theta
     cos = tl.cos(a)
     sin = tl.sin(a)
@@ -48,13 +54,38 @@ def RoPE_kernel(x_ptr, out_ptr, T,d, d_half, offset,BLOCK_SIZE:tl.constexpr):
     out_im = re * sin + im * cos
     tl.store(row_out_ptr + re_offs, out_re, mask = mask)
     tl.store(row_out_ptr + im_offs, out_im, mask = mask)
+@triton.jit
+def RoPE_backward_kernel(g_ptr, dx_ptr,gx_stride,nhg_stride,tg_stride, bdx_stride,nhdx_stride,tdx_stride,T, d, d_half, offset, BLOCK_SIZE:tl.constexpr):
+    pid = tl.program_id(0)
 
+    t = pid % T
+    nh = ( pid // T ) % n
+    b = pid // (T * n)
+    p = t + offset
 
+    g_row_ptr = g_ptr + b * gx_stride + nh * nhg_stride + t * tg_stride
+    dx_row_ptr = dx_ptr + bdx_stride + nh * nhdx_stride + t * tdx_stride
+   
+    offs = tl.arange(0, BLOCK_SIZE)
+    mask = offs < d_half
+    re_offs = 2 * offs
+    im_offs = 2 * offs + 1
+    g_re = tl.load(g_row_ptr + re_offs, mask = mask, other = 0.0).to(tl.float32)
+    g_im = tl.load(g_row_ptr + im_offs, mask = mask, other = 0.0).to(tl.float32)
+    theta = tl.exp(1 / tl.arange(1, d))
+    theta = 1 / tl.exp((offs.to(tl.float32) * 2.0 / d ) * 9.210340371976184)
+    a = p * theta
+    cos = tl.cos(a)
+    sin = tl.sin(a)
+    out_re = g_re * cos + g_im * sin
+    out_im = g_re * sin - g_im * cos
+    tl.store(dx_row_ptr + re_offs, out_re, mask=mask)
+    tl.store(dx_row_ptr + im_offs, out_im, mask=mask)
 
 
 def rope_forward(x, offset):
     B, n, T, d = x.shape
-    x = x.contiguous()
+    # x = x.contiguous() non-contiguous handled in the kernel
     out = torch.empty_like(x)
     d_half = d // 2
     BLOCK_SIZE = triton.next_power_of_2(d_half)
@@ -62,14 +93,39 @@ def rope_forward(x, offset):
         x, out, T, d, d_half, offset, BLOCK_SIZE=BLOCK_SIZE
     )
     return out
+def rope_backward(g, offset):
+    B, n, T, d = g.shape
+    dx = torch.empty_like(g)
+    d_half = d // 2
+    BLOCK_SIZE = triton.next_power_of_2(d_half)
+    RoPE_backward_kernel[(B * n * T,)](
+        g, dx,
+        *g.stride(), *dx.stride(),
+        n, T, d, d_half, offset,
+        BLOCK_SIZE=BLOCK_SIZE,
+    )
+    return dx
 
 
-torch.manual_seed(0)
-device = 'cuda'
-x = torch.randn(2, 4, 16, 64, device=device)
-offset = 0
-r = RoPE(64, 128).to(device)
-x_to = r.forward(x, offset= offset)
-x_t = rope_forward(x, offset= offset)
-print(torch.allclose(x_to, x_t, atol=1e-5, rtol=1e-5))
-print((x_to - x_t).abs().max().item())
+class _RoPEFn(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, x, offset):
+        ctx.offset = offset
+        return rope_forward(x, offset)
+    @staticmethod
+    def backward(ctx, g):
+        return rope_backward(g, ctx.offset), None 
+
+class TritonRoPE(nn.Module):
+    def __init__(self, d, T_max):
+        super().__init__()
+        assert d % 2 == 0
+        self.d = d
+        self.T_max = T_max
+    def forward(self, x, offset = 0):
+        assert x.shape[-1] == self.d
+        assert self.offset + x.shape[-2] <= self.T_max
+        return _RoPEFn.apply(x, offset)
+
+
+

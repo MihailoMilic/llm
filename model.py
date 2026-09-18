@@ -11,8 +11,9 @@ class Block(nn.Module):
             self.norm_mlp = RMSNorm(C)
             self.mlp = SwiGLU(C)
     def forward(self,x, use_cache = False):
-         #PreNorm 
+
          x = x + self.attn(self.norm(x), use_cache = use_cache)
+        # postnorm
          x = x + self.mlp(self.norm_mlp(x))
          return x
 

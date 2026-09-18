@@ -71,7 +71,7 @@ class CausalSelfAttention(nn.Module):
         K = K.view(B,T, g,d)
         V =V.view(B,T, g,d)
         # swap T and n, to keep iterators outside of the matmul range. We want token x entries in matmul, equiv to (B,T,C) @ (B,C,T)
-        Q = Q.transpose(1,2) #(B,n,T,d)
+        Q = Q.transpose(1,2) #(B,n,T,d) now is non-contiguous 
         K = K.transpose(1,2) #(B,g,T,d)
         V = V.transpose(1,2) #(B,g,T,d)
 

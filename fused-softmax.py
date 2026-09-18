@@ -4,7 +4,7 @@ import triton.language as tl
 from triton.runtime import driver
 DEVICE = triton.runtime.driver.active.get_active_torch_device()
 
-
+#copied from triton.lang tutorial page
 def is_hip():
     return triton.runtime.driver.active.get_current_target().backend == "hip"
 
