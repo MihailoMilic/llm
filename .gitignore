@@ -4,3 +4,5 @@
 .txt
 checkpoint_500.pt
 shakespeare.txt
+*.json
+

@@ -1,3 +1,5 @@
+# Written with a help of an AI assistant (Claude). I understand the tests and ran them on GPU.
+# used it to find and fix a bug in the reference RoPE
 import pytest
 import torch
 from embeddings import RoPE, TritonRoPE, rope_forward, rope_backward
