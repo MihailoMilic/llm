@@ -41,11 +41,10 @@ on a non-contiguous tensor, which is exactly what `attention.py` passes in after
 ## Known limitation
 
 Both the RoPE kernel and the tutorial softmax set `BLOCK_SIZE = next_power_of_2(row_length)` and process a row
-in a single block. The row therefore has to fit in registers and shared memory. For RoPE this never binds as
-the row is `head_dim / 2`, at most 64. For a softmax over a sequence or vocabulary dimension it does: a 50k-wide
-row in fp32 is ~200KB, past the SRAM of any SM, and the kernel would spill to local memory, which is backed by
+in a single block. The row therefore has to fit in registers and shared memory. For RoPE this never makes a problem as
+the row is `head_dim / 2`, at most 64. For a softmax over a sequence or vocabulary dimension it does become a problem, as the kernel would spill to local memory, which is backed by
 DRAM and defeats the purpose of fusing. The fix is an online softmax keeping a running
-max and a rescaled running sum — which is the next thing to write.
+max and a rescaled running, which is the next thing to write after finishing RMSNorm and testing it.
 
 ## Next
 
