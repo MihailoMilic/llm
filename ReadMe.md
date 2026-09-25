@@ -1,9 +1,7 @@
 # llm
 
 A LLaMA-style decoder-only transformer written from scratch in PyTorch, with hand-written fused Triton
-kernels for its memory-bound operations. The point of the repo is not the model — it is small — but the
-kernels and the verification around them.
-
+kernels for its memory-bound operations.
 ## Layout
 
 | File | |
@@ -24,9 +22,8 @@ pytest test_rope.py        # needs CUDA
 ```
 
 The RoPE forward and backward kernels are checked against the PyTorch reference across batch/head/sequence
-shapes, head dimensions of 2, 64 and 96, fp32 and bf16, three position offsets, and five memory layouts —
-including non-contiguous inputs and gradients with zero strides, which is what a reduction hands you in a
-backward pass.
+shapes, head dimensions of 2, 64 and 96, fp32 and bf16, three position offsets, and five memory layouts,
+including non-contiguous inputs and gradients with zero strides.
 
 Two of the tests do not use the reference at all:
 
@@ -44,10 +41,10 @@ on a non-contiguous tensor, which is exactly what `attention.py` passes in after
 ## Known limitation
 
 Both the RoPE kernel and the tutorial softmax set `BLOCK_SIZE = next_power_of_2(row_length)` and process a row
-in a single block. The row therefore has to fit in registers and shared memory. For RoPE this never binds —
+in a single block. The row therefore has to fit in registers and shared memory. For RoPE this never binds as
 the row is `head_dim / 2`, at most 64. For a softmax over a sequence or vocabulary dimension it does: a 50k-wide
 row in fp32 is ~200KB, past the SRAM of any SM, and the kernel would spill to local memory, which is backed by
-DRAM and defeats the purpose of fusing. The fix is a streaming reduction — an online softmax keeping a running
+DRAM and defeats the purpose of fusing. The fix is an online softmax keeping a running
 max and a rescaled running sum — which is the next thing to write.
 
 ## Next
