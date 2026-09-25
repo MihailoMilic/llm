@@ -1,0 +1,6 @@
+\__pycache__
+\wandb
+.pt
+.txt
+checkpoint_500.pt
+shakespeare.txt

@@ -18,7 +18,7 @@ class RoPE(nn.Module):
         # x (B,n,T,d) -> (B,n,T,d)
         dtype = x.dtype
         B,n,T,d = x.shape
-        x_out = x.reshape(B,n,T,d//2, 2)
+        x_out = x.to(torch.float32).contiguous().reshape(B, n, T, d // 2, 2)
         complex_table = self.complex_table[offset:offset+T].reshape(1,1,T,d//2)
         x_out = torch.view_as_complex(x_out.to(torch.float32)) * complex_table
         x_out = torch.view_as_real(x_out).contiguous().view(B,n,T,d).to(dtype=dtype)
@@ -138,6 +138,5 @@ class TritonRoPE(nn.Module):
         assert x.shape[-1] == self.d
         assert offset + x.shape[-2] <= self.T_max
         return _RoPEFn.apply(x, offset)
-
 
 

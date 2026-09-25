@@ -2,7 +2,7 @@ from torch import nn
 import torch.nn.functional as F
 import torch
 from config import device
-from embeddings import RoPE
+from embeddings import RoPE, TritonRoPE
 
 
 class CausalSelfAttention(nn.Module):
@@ -15,8 +15,8 @@ class CausalSelfAttention(nn.Module):
 
         self.n_heads = n_heads
         self.d = C // n_heads
-
-        self.rope = RoPE(self.d, max_T)
+        # self.rope = RoPE(self.d, max_T)
+        self.rope = TritonRoPE(self.d, max_T)
 
         self.q_k_v = nn.Linear(C, C + 2*(self.d *self.gqa_group))
         self.w_out = nn.Linear(C, C)
